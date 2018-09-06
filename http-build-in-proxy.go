@@ -17,8 +17,9 @@ func acceptConnectionsBuiltinProxy(listeners []*net.TCPListener) {
 	for index := range listeners {
 		listener := listeners[index]
 
-		proxy := &httputil.ReverseProxy{}
-		proxy.Director = func(req *http.Request) {
+		proxyToBackend := &httputil.ReverseProxy{}
+		proxyToBackend.Director = func(req *http.Request) {
+			// TODO: send http request to QUIC backend
 			localAddr := req.Context().Value(http.LocalAddrContextKey).(net.Addr)
 			targetAddr, err := getTargetAddr(ConnectionID("none"), localAddr)
 			if err != nil {
@@ -51,8 +52,9 @@ func acceptConnectionsBuiltinProxy(listeners []*net.TCPListener) {
 				if err != nil {
 					logrus.Debugf("Can't convert domain to ascii '%v': %v", req.Host, err)
 				}
-				domainPresent := DomainPresent(asciiDomain)
-				logrus.Infof("Start proxy from '%v' to '%v', %v", clientIP, targetAddrString, domainPresent)
+				//domainPresent := DomainPresent(asciiDomain)
+				//logrus.Infof("BuiltinProxy from '%v' to http://%v (%v)", clientIP, domainPresent, targetAddrString)
+				logrus.Infof("BuiltinProxy from '%v' to http://%v (%v)", clientIP, asciiDomain, targetAddrString)
 			}
 
 			if *connectionIdHeader != "" {
@@ -61,7 +63,7 @@ func acceptConnectionsBuiltinProxy(listeners []*net.TCPListener) {
 
 		}
 
-		proxy.ModifyResponse = func(resp *http.Response) error {
+		proxyToBackend.ModifyResponse = func(resp *http.Response) error {
 			return nil
 		}
 
@@ -69,14 +71,14 @@ func acceptConnectionsBuiltinProxy(listeners []*net.TCPListener) {
 
 		server := http.Server{}
 		server.TLSConfig = createTlsConfig()
-		server.Handler = proxy
+		server.Handler = proxyToBackend
 
 		switch keepAliveMode {
 		case KEEPALIVE_TRANSPARENT:
 			// pass. Do native.
 		case KEEPALIVE_NO_BACKEND:
 			// copy default transport + disable keepalive
-			proxy.Transport = &http.Transport{
+			proxyToBackend.Transport = &http.Transport{
 				Proxy: http.ProxyFromEnvironment,
 				DialContext: (&net.Dialer{
 					Timeout:   30 * time.Second,

@@ -47,7 +47,7 @@ const (
 	SERVICE_NAME_EXAMPLE                             = "<service-name>"
 	WORKING_DIR_ARG_NAME                             = "working-dir"
 	DEFAULT_BIND_PORT                                = 443
-	DEFAULT_BIND_HTTP_VALIDATION_PORT                = 4443
+	DEFAULT_BIND_HTTP_VALIDATION_PORT                = 80
 	DAEMON_KEY_NAME                                  = "daemon"
 )
 
@@ -351,6 +351,7 @@ func acceptConnectionsOwn(listeners []*net.TCPListener) {
 		go acceptConnectionsFromAListener(listener)
 	}
 }
+
 func acceptConnectionsTLS(listeners []*net.TCPListener) {
 	switch *proxyMode {
 	case PROXYMODE_HTTP, PROXYMODE_TCP:
@@ -742,8 +743,20 @@ func handleTcpConnection(cid ConnectionID, in *net.TCPConn) {
 	if serverName == "" {
 		serverName = *defaultDomain + " (by default)"
 	}
-	logrus.Infof("Start proxy from '%v' to '%v' cid '%v' domain %v", in.RemoteAddr(), &target, cid, DomainPresent(serverName))
+	//logrus.Infof("Start proxy from '%v' to http://%v (%v) cid '%v'", in.RemoteAddr(), DomainPresent(serverName), &target, cid)
+	logrus.Infof("Start proxy from '%v' to http://%v (%v) cid '%v'", in.RemoteAddr(), serverName, &target, cid)
 	startProxy(cid, target, tlsConn)
+}
+
+func uniqueAppend(s [][]byte, line []byte) [][]byte {
+	for _, item := range s {
+		if bytes.EqualFold(line, item) {
+			logrus.Debugf("uniqueAppend: item %s already existed in slice", line)
+			return s
+		}
+	}
+	logrus.Debugf("uniqueAppend: item %s appended into slice", line)
+	return append(s, line)
 }
 
 func prepare() {
@@ -776,12 +789,19 @@ func prepare() {
 		logrus.Info("Non cert domain regexps: ", "['"+strings.Join(regexps, "', '")+"']")
 	}
 
+	// cut wellknown header about client ip
+	cutHeaders = uniqueAppend(cutHeaders, []byte(strings.ToUpper("X-Forwarded-For")))
+	cutHeaders = uniqueAppend(cutHeaders, []byte(strings.ToUpper("X-Real-IP")))
+
+	realIPHeaderNames = uniqueAppend(realIPHeaderNames, []byte("X-Forwarded-For"))
+	realIPHeaderNames = uniqueAppend(realIPHeaderNames, []byte("X-Real-IP"))
+
 	for _, line := range strings.Split(*realIPHeader, ",") {
 		line = strings.TrimSpace(line)
 		if line != "" {
-			realIPHeaderNames = append(realIPHeaderNames, []byte(line))
-			cutHeaders = append(realIPHeaderNames, []byte(strings.ToUpper(line)))
-			if !strings.EqualFold(line, "X-Forwarded-For") { // X-Forwarded-For - appended auto by reverse proxy
+			realIPHeaderNames = uniqueAppend(realIPHeaderNames, []byte(line))
+			cutHeaders = uniqueAppend(cutHeaders, []byte(strings.ToUpper(line)))
+			if !strings.EqualFold(line, "X-Forwarded-For") && !strings.EqualFold(line, "X-Real-IP") { // X-Forwarded-For/X-Real-IP - appended auto by reverse proxy
 				realIPHeaderNamesStrings = append(realIPHeaderNamesStrings, textproto.CanonicalMIMEHeaderKey(line))
 			}
 		}
@@ -792,7 +812,7 @@ func prepare() {
 
 		headerParts := strings.SplitN(addHeader, "=", 2)
 		if len(headerParts) > 0 {
-			cutHeaders = append(cutHeaders, []byte(strings.ToUpper(headerParts[0])))
+			cutHeaders = uniqueAppend(cutHeaders, []byte(strings.ToUpper(headerParts[0])))
 			headerName = headerParts[0]
 		}
 		buf := &bytes.Buffer{}

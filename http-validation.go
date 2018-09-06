@@ -3,6 +3,7 @@ package main
 import (
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"sync"
@@ -23,18 +24,32 @@ var (
 type HttpValidationHandler struct{}
 
 func (HttpValidationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	logrus.Debugf("Http-01-validation request: %v", r.URL.String())
+	logrus.Debugf("HTTP request: %v", r.URL.String())
 
 	pathNormalization := r.URL.Path
 	for len(pathNormalization) > 1 && pathNormalization[0] == '/' && pathNormalization[1] == '/' {
 		pathNormalization = pathNormalization[1:]
 	}
+
 	if r.Method != http.MethodGet || !strings.HasPrefix(pathNormalization, Http01ValidationPrefix) {
-		logrus.Infof("Received bad http validation connection from '%v' method '%v' uri '%v'",
-			r.RemoteAddr, r.Method, r.RequestURI)
-		w.WriteHeader(http.StatusForbidden)
+		// logrus.Infof("Received bad http validation connection from '%v' method '%v' uri '%v'",
+		// 	r.RemoteAddr, r.Method, r.RequestURI)
+		// w.WriteHeader(http.StatusForbidden)
+
+		// remove/add not default ports from req.Host
+
+		targetUrl := url.URL{Scheme: "https", Host: r.Host, Path: r.URL.Path, RawQuery: r.URL.RawQuery}
+		httpReq := url.URL{Scheme: "http", Host: r.Host, Path: r.URL.Path, RawQuery: r.URL.RawQuery}
+
+		logrus.Infof("redirect non-Http-01-validation request %s to %s", httpReq.String(), targetUrl.String())
+
+		http.Redirect(w, r, targetUrl.String(),
+			// see @andreiavrammsd comment: often 307 > 301
+			http.StatusTemporaryRedirect)
+
 		return
 	}
+	logrus.Debugf("Http-01-validation request: %v", r.URL.String())
 
 	// http-01 validation
 	w.Header().Set("Content-type", "text/plain")

@@ -278,7 +278,7 @@ readHeaderLines:
 					res.IsLimited = true
 				}
 			default:
-				logrus.Debugf("ERROR. Unknow why i need header content. Code error. From '%v' to '%v' cid '%v', header name '%s'",
+				logrus.Debugf("ERROR. Unknow why I need header content. Code error. From '%v' to '%v' cid '%v', header name '%s'",
 					sourceConn.RemoteAddr(), targetConn.RemoteAddr(), cid, headerName,
 				)
 			}
@@ -294,9 +294,10 @@ readHeaderLines:
 	// Write real IP
 	for _, header := range realIPHeaderNames {
 		headerBuf.Write(header)
-		headerBuf.WriteByte(':')
+		headerBuf.WriteString(": ")
 		headerBuf.WriteString(remoteAddrString)
 		headerBuf.WriteString("\r\n")
+		logrus.Debugf("RealIP header: %s: %s", string(header), remoteAddrString)
 	}
 
 	// Write CID
@@ -455,13 +456,13 @@ func proxyHTTPBody(cid ConnectionID, dst, src net.Conn, headers proxyHTTPHeaders
 
 func startProxy(cid ConnectionID, targetAddr net.TCPAddr, in net.Conn) {
 	switch *proxyMode {
-	case "http":
+	case PROXYMODE_HTTP:
 		startProxyHTTP(cid, targetAddr, in)
-	case "tcp":
+	case PROXYMODE_TCP:
 		startProxyTCP(cid, targetAddr, in)
 	default:
 		in.Close()
-		logrus.Panicf("Unknow proxy mode cid '%v': %v", cid, *proxyMode)
+		logrus.Panicf("startProxy: unknow proxy mode cid '%v': %v", cid, *proxyMode)
 	}
 }
 
