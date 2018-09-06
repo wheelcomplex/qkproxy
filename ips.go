@@ -43,6 +43,10 @@ var (
 		parseNet("192.168.0.0/16"),
 		parseNet("FC00::/7"),
 	}
+	externalIPSources = []string{
+		"ifconfig.io",
+		"ifconfig.me",
+	}
 )
 
 func getAllowIPs() ipSlice {
@@ -100,46 +104,73 @@ func getLocalIPs() (res ipSlice) {
 	return res
 }
 
-func getIpByExternalRequest() (res ipSlice) {
-	fGetIp := func(network string) net.IP {
-		client := http.Client{Transport: &http.Transport{
-			Dial: func(_supress_network, addr string) (net.Conn, error) {
-				return net.Dial(network, addr)
-			},
+func fGetIP(source string, network string) net.IP {
+	client := http.Client{Transport: &http.Transport{
+		Dial: func(_supress_network, addr string) (net.Conn, error) {
+			return net.Dial(network, addr)
 		},
-		}
-		client.Timeout = *getIPByExternalRequestTimeout
-		resp, err := client.Get("http://ifconfig.io/ip")
-		if resp != nil && resp.Body != nil {
-			defer resp.Body.Close()
-		}
-		if err != nil {
-			logrus.Debugf("Can't request to http://ifconfig.io/ip (%v): %v", network, err)
-			return nil
-		}
-		respBytes, err := ioutil.ReadAll(resp.Body)
-		if err != nil {
-			logrus.Debugf("Can't read response from http://ifconfig.io/ip (%v): %v", network, err)
-			return nil
-		}
-		ip := net.ParseIP(strings.TrimSpace(string(respBytes)))
-		logrus.Debugf("Detected ip by http://ifconfig.io/ip (%v): %v", network, ip)
-		return ip
+	},
 	}
+	client.Timeout = *getIPByExternalRequestTimeout
+
+	req, err := http.NewRequest("GET", "http://"+source+"/ip", nil)
+	if err != nil {
+		logrus.Debugf("Can't create request to http://"+source+"/ip (%v): %v", network, err)
+		return nil
+	}
+
+	// Chrome emulated
+	req.Header.Set("Host", source)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/68.0.3440.106 Safari/537.36")
+	req.Header.Set("Connection", "close")
+	req.Header.Set("Cache-Control", "max-age=0")
+	req.Header.Set("Accept", "text/html")
+	req.Header.Set("accept-encoding", "none")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		logrus.Debugf("Can't send request to http://"+source+"/ip (%v): %v", network, err)
+		return nil
+	}
+	if resp != nil && resp.Body != nil {
+		defer resp.Body.Close()
+	}
+
+	respBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		logrus.Debugf("Can't read response from http://"+source+"/ip (%v): %v", network, err)
+		return nil
+	}
+
+	rawIP := strings.TrimSpace(string(respBytes))
+	ip := net.ParseIP(rawIP)
+	logrus.Debugf("Detected ip by http://"+source+"/ip (%v): %v (%s)", network, ip, rawIP)
+	return ip
+}
+
+func getIpByExternalRequest() (res ipSlice) {
+
+	var tcp4ch = make(chan net.IP, len(externalIPSources)*2)
+	var tcp6ch = make(chan net.IP, len(externalIPSources)*2)
 
 	res = make(ipSlice, 2)
 
-	wg := &sync.WaitGroup{}
-	wg.Add(2)
-	go func() {
-		res[0] = fGetIp("tcp4")
-		wg.Done()
-	}()
-	go func() {
-		res[1] = fGetIp("tcp6")
-		wg.Done()
-	}()
-	wg.Wait()
+	for _, source := range externalIPSources {
+		go func(source string) {
+			ip := fGetIP(source, "tcp4")
+			if ip == nil {
+				// delay nil response
+				time.Sleep(*getIPByExternalRequestTimeout * 2)
+			}
+			tcp4ch <- ip
+		}(source)
+	}
+
+	// take the first response
+	res[0] = <-tcp4ch
+
+	res[1] = <-tcp6ch
+
 	return res
 }
 
