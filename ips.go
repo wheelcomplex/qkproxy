@@ -164,23 +164,22 @@ func getIpByExternalRequest() (res ipSlice) {
 		}(source)
 	}
 
-	ipcnt := len(externalIPSources) * 2
-	for ipcnt > 0 && (res[0] == nil || res[1] == nil) {
+	ip4cnt := len(externalIPSources)
+	ip6cnt := len(externalIPSources)
+	for (ip4cnt > 0 && res[0] == nil) || (ip6cnt > 0 && res[1] == nil) {
 		select {
 		case tcp4ip := <-tcp4ch:
 			if tcp4ip != nil {
 				res[0] = tcp4ip
-				ipcnt -= 2
-			} else {
-				ipcnt--
 			}
+			logrus.Debugf("ip4#%d, %v", ip4cnt, tcp4ip)
+			ip4cnt--
 		case tcp6ip := <-tcp6ch:
 			if tcp6ip != nil {
 				res[1] = tcp6ip
-				ipcnt -= 2
-			} else {
-				ipcnt--
 			}
+			logrus.Debugf("ip6#%d, %v", ip6cnt, tcp6ip)
+			ip6cnt--
 		}
 	}
 	return res
