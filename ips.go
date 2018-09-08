@@ -157,20 +157,32 @@ func getIpByExternalRequest() (res ipSlice) {
 
 	for _, source := range externalIPSources {
 		go func(source string) {
-			ip := fGetIP(source, "tcp4")
-			if ip == nil {
-				// delay nil response
-				time.Sleep(*getIPByExternalRequestTimeout * 2)
-			}
-			tcp4ch <- ip
+			tcp4ch <- fGetIP(source, "tcp4")
+		}(source)
+		go func(source string) {
+			tcp6ch <- fGetIP(source, "tcp6")
 		}(source)
 	}
 
-	// take the first response
-	res[0] = <-tcp4ch
-
-	res[1] = <-tcp6ch
-
+	ipcnt := len(externalIPSources) * 2
+	for ipcnt > 0 && (res[0] == nil || res[1] == nil) {
+		select {
+		case tcp4ip := <-tcp4ch:
+			if tcp4ip != nil {
+				res[0] = tcp4ip
+				ipcnt -= 2
+			} else {
+				ipcnt--
+			}
+		case tcp6ip := <-tcp6ch:
+			if tcp6ip != nil {
+				res[1] = tcp6ip
+				ipcnt -= 2
+			} else {
+				ipcnt--
+			}
+		}
+	}
 	return res
 }
 
@@ -251,6 +263,9 @@ func forceReadAllowedIPs() ipSlice {
 				logrus.Debug("Can't find local public ipv4 address. Try detect ip by external request. Local addresses:", localIPs)
 				externalIPs := getIpByExternalRequest()
 				for _, ip := range externalIPs {
+					if ip == nil {
+						continue
+					}
 					if ip.To4() != nil && hasIpv4 || ip.To4() == nil && hasIpv6 {
 						logrus.Debug("IP add allowed by external request:", ip)
 						autoAllowedIps = append(autoAllowedIps, ip)
