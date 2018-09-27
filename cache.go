@@ -41,12 +41,12 @@ func certificateCacheGet(domain string) *tls.Certificate {
 		}
 	}
 
-	if *certDir == "" {
+	if *srvdata.Flags.certDir == "" {
 		logrus.Debugf("Skip certificateCacheGet becouse certDir is empty")
 		return nil
 	}
-	keyPath := filepath.Join(*certDir, domain+".key")
-	certPath := filepath.Join(*certDir, domain+".crt")
+	keyPath := filepath.Join(*srvdata.Flags.certDir, domain+".key")
+	certPath := filepath.Join(*srvdata.Flags.certDir, domain+".crt")
 	cert, err := tls.LoadX509KeyPair(certPath, keyPath)
 
 	switch {
@@ -94,19 +94,19 @@ func certificateCachePut(domain string, cert *tls.Certificate) {
 		certMemCache.Add(domain, cert)
 	}
 
-	if *certDir == "" {
+	if *srvdata.Flags.certDir == "" {
 		logrus.Debugf("Skip certificateCachePut becouse certDir is empty")
 		return
 	}
-	err := os.MkdirAll(*certDir, 0700)
+	err := os.MkdirAll(*srvdata.Flags.certDir, 0700)
 	if err != nil {
-		logrus.Errorf("Can't create dir for save cached cert '%v':%v", *certDir, err)
+		logrus.Errorf("Can't create dir for save cached cert '%v':%v", *srvdata.Flags.certDir, err)
 		return
 	}
 
-	keyPath := filepath.Join(*certDir, domain+".key")
-	certPath := filepath.Join(*certDir, domain+".crt")
-	jsonPath := filepath.Join(*certDir, domain+".json")
+	keyPath := filepath.Join(*srvdata.Flags.certDir, domain+".key")
+	certPath := filepath.Join(*srvdata.Flags.certDir, domain+".crt")
+	jsonPath := filepath.Join(*srvdata.Flags.certDir, domain+".json")
 
 	keyFile, err := os.OpenFile(keyPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, PRIVATE_KEY_FILEMODE)
 	if keyFile != nil {
@@ -159,7 +159,7 @@ func certificateCachePut(domain string, cert *tls.Certificate) {
 
 	logrus.Infof("Save certificate for domain %v to files: %v, %v", DomainPresent(domain), keyPath, certPath)
 
-	if *certJsonSave {
+	if *srvdata.Flags.certJsonSave {
 		if cert.Leaf != nil {
 			info := struct {
 				Domains    []string

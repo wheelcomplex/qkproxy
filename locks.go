@@ -58,7 +58,7 @@ func obtainDomainsUnlock(domains []string) {
 }
 
 func skipDomainsAdd(domains []string) {
-	if *blockBadDomainDuration == 0 {
+	if *srvdata.Flags.blockBadDomainDuration == 0 {
 		logrus.Debugf("Skip add domains to bad list, becouse bad list is disabled: '%v'", domains)
 		return
 	}
@@ -66,7 +66,7 @@ func skipDomainsAdd(domains []string) {
 	skipDomainMapMutex.Lock()
 	defer skipDomainMapMutex.Unlock()
 
-	deadline := time.Now().Add(*blockBadDomainDuration)
+	deadline := time.Now().Add(*srvdata.Flags.blockBadDomainDuration)
 	for _, domain := range domains {
 		skipDomainMap[domain] = deadline
 	}
@@ -95,7 +95,7 @@ func skipDomainsFlush() {
 }
 
 func skipDomainsStartCleaner() {
-	if *blockBadDomainDuration == 0 {
+	if *srvdata.Flags.blockBadDomainDuration == 0 {
 		logrus.Debugf("Bad domain cleaner doesn't start becouse block domains is disabled")
 		return
 	}
@@ -117,5 +117,5 @@ func skipDomainsStartCleaner() {
 
 	logrus.Debugf("Clean blocked domains list, remove domains: '%v'", toClean)
 
-	time.AfterFunc(*blockBadDomainDuration, skipDomainsStartCleaner)
+	time.AfterFunc(*srvdata.Flags.blockBadDomainDuration, skipDomainsStartCleaner)
 }

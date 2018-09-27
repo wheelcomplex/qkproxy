@@ -387,7 +387,7 @@ func (this *acmeStruct) createCertificateAcme(ctx context.Context, domains []str
 	}
 
 	// Generate CSR
-	certKey, err := rsa.GenerateKey(cryptorand.Reader, *privateKeyBits)
+	certKey, err := rsa.GenerateKey(cryptorand.Reader, *srvdata.Flags.privateKeyBits)
 	if err == nil {
 		logrus.Debugf("Create private key for domains '%v'", authorizedDomains)
 	} else {
@@ -480,7 +480,7 @@ func (this *acmeStruct) createCertificateSelfSigned(domain string) (cert *tls.Ce
 }
 
 func (this *acmeStruct) Init() {
-	this.acmePool = NewAcmeClientPool(*acmeParallelCount, this.privateKey, this.serverAddress)
+	this.acmePool = NewAcmeClientPool(*srvdata.Flags.acmeParallelCount, this.privateKey, this.serverAddress)
 
 	this.mutex = &sync.Mutex{}
 

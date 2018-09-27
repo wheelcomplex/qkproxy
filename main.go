@@ -18,10 +18,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"runtime/debug"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"bufio"
@@ -87,11 +85,14 @@ func HasPrefixFold(s, prefix string) bool {
 	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
 }
 
+// service data
+var srvdata = NewServiceData()
+
 func main() {
 	flag.Usage = usage
 	flag.Parse()
 
-	if *versionPrint {
+	if *srvdata.Flags.versionPrint {
 		fmt.Println(strings.TrimSpace(VERSION))
 		return
 	}
@@ -99,7 +100,7 @@ func main() {
 	// Set loglevel
 	logrus.SetLevel(logrus.WarnLevel)
 	logrus.SetFormatter(&logrus.TextFormatter{FullTimestamp: true})
-	switch *logLevel {
+	switch *srvdata.Flags.logLevel {
 	case "fatal":
 		logrus.SetLevel(logrus.FatalLevel)
 	case "error":
@@ -111,34 +112,34 @@ func main() {
 	case "debug":
 		logrus.SetLevel(logrus.DebugLevel)
 	default:
-		logrus.Errorf("Use default loglevel '%v', becouse unknow level: '%v'", logrus.GetLevel(), *logLevel)
+		logrus.Errorf("Use default loglevel '%v', becouse unknow level: '%v'", logrus.GetLevel(), *srvdata.Flags.logLevel)
 	}
 
 	isDaemon := false
 
-	if *serviceAction == "" {
-		if *daemonFlag {
+	if *srvdata.Flags.serviceAction == "" {
+		if *srvdata.Flags.daemonFlag {
 			if !daemonize() {
 				return
 			}
 			isDaemon = true
 		} else {
-			if *pidFilePath != "" {
-				err := ioutil.WriteFile(*pidFilePath, []byte(strconv.Itoa(os.Getpid())), 0600)
+			if *srvdata.Flags.pidFilePath != "" {
+				err := ioutil.WriteFile(*srvdata.Flags.pidFilePath, []byte(strconv.Itoa(os.Getpid())), 0600)
 				if err != nil {
-					logrus.Errorf("Can't write pid file '%v': %v", *pidFilePath, err)
+					logrus.Errorf("Can't write pid file '%v': %v", *srvdata.Flags.pidFilePath, err)
 					return
 				}
 			}
 		}
 	}
 
-	if *workingDir != "" {
-		if !filepath.IsAbs(*workingDir) {
-			logrus.Fatalf("Working dir must be absolute filepath instead relative: '%v'", *workingDir)
+	if *srvdata.Flags.workingDir != "" {
+		if !filepath.IsAbs(*srvdata.Flags.workingDir) {
+			logrus.Fatalf("Working dir must be absolute filepath instead relative: '%v'", *srvdata.Flags.workingDir)
 		}
 
-		err := os.Chdir(*workingDir)
+		err := os.Chdir(*srvdata.Flags.workingDir)
 		if err != nil {
 			logrus.Error("Can't change working dir: ", err)
 		}
@@ -147,25 +148,25 @@ func main() {
 	isDaemon = isDaemon || !service.Interactive() && runtime.GOOS == "windows"
 
 	logouts := []io.Writer{}
-	if *noLogStderr || isDaemon { // Run as windows-service or unix-daemon
+	if *srvdata.Flags.noLogStderr || isDaemon { // Run as windows-service or unix-daemon
 		// don't append os.Stderr to logouts
 	} else {
 		logouts = append(logouts, os.Stderr)
 	}
 
 	var logFileName string
-	if *logOutput != "-" {
-		logFileName = *logOutput
+	if *srvdata.Flags.logOutput != "-" {
+		logFileName = *srvdata.Flags.logOutput
 	}
 	if logFileName != "" {
 		lr := &lumberjack.Logger{
 			Filename:   logFileName,
-			MaxSize:    *logrotateMb,
-			MaxAge:     *logrotateMaxAge,
-			MaxBackups: *logrotateMaxCount,
+			MaxSize:    *srvdata.Flags.logrotateMb,
+			MaxAge:     *srvdata.Flags.logrotateMaxAge,
+			MaxBackups: *srvdata.Flags.logrotateMaxCount,
 			LocalTime:  true,
 		}
-		if *logrotateMb == 0 {
+		if *srvdata.Flags.logrotateMb == 0 {
 			lr.MaxSize = int(math.MaxInt32) // about 2 Petabytes. Really no reachable in this scenario.
 		}
 		defer lr.Close()
@@ -193,8 +194,8 @@ func main() {
 	logrus.Info("Version: ", VERSION)
 
 	// for unix redirect when daemon child start
-	if *stdErrToFile != "" && runtime.GOOS == "windows" {
-		fName := filepath.Join(*workingDir, *stdErrToFile)
+	if *srvdata.Flags.stdErrToFile != "" && runtime.GOOS == "windows" {
+		fName := filepath.Join(*srvdata.Flags.workingDir, *srvdata.Flags.stdErrToFile)
 		var err error
 		stdErrFileGlobal, err = os.OpenFile(fName, os.O_APPEND|os.O_CREATE, 0600) // mode 0644 copied from lubmerjeck log
 		if err == nil {
@@ -208,21 +209,21 @@ func main() {
 		logrus.Debug("Sleep a second - need for complete redirect stderr")
 	}
 
-	if *panicTest {
+	if *srvdata.Flags.panicTest {
 		panic("Test panic by --panic key")
 	}
 
-	if *runAs != "" && !*daemonFlag {
+	if *srvdata.Flags.runAs != "" && !*srvdata.Flags.daemonFlag {
 		logrus.Fatal("Key --runas used without --daemon key. It isn't supported.")
 	}
 
 	prepare()
-	if *initOnly {
+	if *srvdata.Flags.initOnly {
 		return
 	}
 
 	// profiler
-	if *profilerBindAddress != "" && *profilerPassword != "" {
+	if *srvdata.Flags.profilerBindAddress != "" && *srvdata.Flags.profilerPassword != "" {
 		go startProfiler()
 	} else {
 		logrus.Info("Profiler disabled")
@@ -231,7 +232,7 @@ func main() {
 	go signalWorker()
 
 	var serviceArguments []string
-	if *workingDir == "" {
+	if *srvdata.Flags.workingDir == "" {
 		wd, _ := os.Getwd()
 		serviceArguments = append([]string{"--" + WORKING_DIR_ARG_NAME + "=" + wd}, os.Args[1:]...)
 	} else {
@@ -250,12 +251,12 @@ func main() {
 
 	logrus.Debug("Service arguments:", serviceArguments)
 	svcConfig := &service.Config{
-		Name:        *serviceName,
-		Description: "Reverse proxy for handle ssl/https requests",
+		Name:        *srvdata.Flags.serviceName,
+		Description: "QUIC proxy server",
 		Arguments:   serviceArguments,
 	}
-	program := &letsService{}
-	s, err := service.New(program, svcConfig)
+
+	s, err := service.New(srvdata, svcConfig)
 	if err != nil {
 		if runtime.GOOS == "freebsd" && err == service.ErrNoServiceSystemDetected {
 			logrus.Info("Service actions don't support for freebsd")
@@ -271,22 +272,24 @@ func main() {
 		return
 	}
 
-	if *serviceAction != "" && *serviceName == SERVICE_NAME_EXAMPLE {
+	if *srvdata.Flags.serviceAction != "" && *srvdata.Flags.serviceName == SERVICE_NAME_EXAMPLE {
 		logrus.Error("Setup service-name for usage service-action")
 		os.Exit(1)
 	}
 
-	switch *serviceAction {
+	switch *srvdata.Flags.serviceAction {
 	case "":
-		logrus.Info("Start interactive mode")
+		logrus.Info("Start from command line ...")
 
 		// Simple start
-		err = startWork()
+		var sleepChan = make(chan int, 1)
+		err = startWork(sleepChan)
 		if err == nil {
-			// sleep forever
-			var sleepChan chan struct{}
-			<-sleepChan
+			// wait for exit
+			code := <-sleepChan
+			os.Exit(code)
 		} else {
+			logrus.Errorf("exit with error: %s", err)
 			os.Exit(1)
 		}
 
@@ -340,56 +343,10 @@ func main() {
 			os.Exit(1)
 		}
 	default:
-		fmt.Printf("Unknown service action: '%v'\n", *serviceAction)
+		fmt.Printf("Unknown service action: '%v'\n", *srvdata.Flags.serviceAction)
 		os.Exit(1)
 	}
 
-}
-
-func acceptConnectionsOwn(listeners []*net.TCPListener) {
-	for _, listener := range listeners {
-		go acceptConnectionsFromAListener(listener)
-	}
-}
-
-func acceptConnectionsTLS(listeners []*net.TCPListener) {
-	switch *proxyMode {
-	case PROXYMODE_HTTP, PROXYMODE_TCP:
-		acceptConnectionsOwn(listeners)
-	case PROXYMODE_HTTP_BUILTIN:
-		acceptConnectionsBuiltinProxy(listeners)
-	default:
-		logrus.Fatalf("Bad proxy mode: %v", *proxyMode)
-	}
-}
-
-func acceptConnectionsFromAListener(listener *net.TCPListener) {
-	started := time.Now().Unix()
-	for {
-		tcpConn, err := listener.AcceptTCP()
-		if err != nil || tcpConn == nil {
-			logrus.Warn("Can't accept tcp connection: ", err)
-			if tcpConn != nil {
-				tcpConn.Close()
-			}
-			continue
-		}
-		go func() {
-			cn := atomic.AddInt64(&globalConnectionNumber, 1)
-			cid := ConnectionID(strconv.FormatInt(started, 10) + "-" + strconv.FormatInt(cn, 10))
-
-			defer func() {
-				recoveredErr := recover()
-				if recoveredErr != nil {
-					logrus.Errorf("PANIC error, handled by recover cid '%v': %v. Version '%v'. Stacktrace: %s",
-						cid, recoveredErr, VERSION, debug.Stack(),
-					)
-				}
-			}()
-
-			handleTcpConnection(cid, tcpConn)
-		}()
-	}
 }
 
 func certificateGet(clientHello *tls.ClientHelloInfo) (cert *tls.Certificate, err error) {
@@ -398,7 +355,7 @@ func certificateGet(clientHello *tls.ClientHelloInfo) (cert *tls.Certificate, er
 
 	domain := clientHello.ServerName
 	if domain == "" {
-		domain = *defaultDomain
+		domain = *srvdata.Flags.defaultDomain
 	}
 	err = domainValidName(domain)
 	if err != nil {
@@ -411,7 +368,7 @@ func certificateGet(clientHello *tls.ClientHelloInfo) (cert *tls.Certificate, er
 	var baseDomain = domain
 	var domainsToObtain []string
 
-	for _, subdomainPrefix := range subdomainPrefixedForUnion {
+	for _, subdomainPrefix := range srvdata.subdomainPrefixedForUnion {
 		if strings.HasPrefix(domain, subdomainPrefix) {
 			baseDomain = domain[len(subdomainPrefix):]
 			break
@@ -422,7 +379,7 @@ func certificateGet(clientHello *tls.ClientHelloInfo) (cert *tls.Certificate, er
 
 	if strings.HasSuffix(domain, ACME_DOMAIN_SUFFIX) {
 		// force generate new certificate, without caching.
-		return acmeService.CreateCertificate(ctx, []string{domain}, "")
+		return srvdata.acmeService.CreateCertificate(ctx, []string{domain}, "")
 	}
 
 	now := time.Now()
@@ -450,7 +407,7 @@ checkCertInCache:
 
 		case cert != nil:
 			// need for background cert renew
-			if cert.Leaf.NotAfter.Before(now.Add(*timeToRenew)) {
+			if cert.Leaf.NotAfter.Before(now.Add(*srvdata.Flags.timeToRenew)) {
 				go func(domainsToObtain []string, baseDomain string) {
 					if skipDomainsCheck(domainsToObtain) {
 						return
@@ -471,7 +428,7 @@ checkCertInCache:
 					func() {
 						backgroundRenewCtx, backgroundRenewCtxCancelFunc := context.WithTimeout(context.Background(), LETSENCRYPT_BACKGROUND_RENEW_CERTIFICATE_TIMEOUT*5)
 						defer backgroundRenewCtxCancelFunc()
-						cert, err := acmeService.CreateCertificate(backgroundRenewCtx, domainsToObtain, "")
+						cert, err := srvdata.acmeService.CreateCertificate(backgroundRenewCtx, domainsToObtain, "")
 						if err == nil {
 							logrus.Infof("Background certificate obtained for: %v", cert.Leaf.DNSNames)
 							certificateCachePut(baseDomain, cert)
@@ -490,9 +447,9 @@ checkCertInCache:
 		}
 
 		if domainsToObtain == nil {
-			domainsToObtain = make([]string, 1, len(subdomainPrefixedForUnion)+1)
+			domainsToObtain = make([]string, 1, len(srvdata.subdomainPrefixedForUnion)+1)
 			domainsToObtain[0] = baseDomain
-			for _, subdomain := range subdomainPrefixedForUnion {
+			for _, subdomain := range srvdata.subdomainPrefixedForUnion {
 				domainsToObtain = append(domainsToObtain, subdomain+baseDomain)
 			}
 		}
@@ -538,12 +495,12 @@ checkCertInCache:
 forRegexpCheckDomain:
 	for _, checkDomain := range domainsToObtain {
 		whiteList := false
-		if stringsSortedContains(whiteListFromParam, checkDomain) {
+		if stringsSortedContains(srvdata.whiteListFromParam, checkDomain) {
 			logrus.Debugf("Domain allowed by param whitelist: %v\n", checkDomain)
 			whiteList = true
 		}
 		if !whiteList {
-			for _, re := range whiteListFromParamRe {
+			for _, re := range srvdata.whiteListFromParamRe {
 				if re.MatchString(checkDomain) {
 					logrus.Debugf("Domain allowed by whitelist param regexp '%v': %v", re, checkDomain)
 					whiteList = true
@@ -552,7 +509,7 @@ forRegexpCheckDomain:
 			}
 		}
 		if !whiteList {
-			for _, re := range nonCertDomainsRegexps {
+			for _, re := range srvdata.nonCertDomainsRegexps {
 				if re.MatchString(checkDomain) {
 					logrus.Debugf("Reject obtain cert for domain %v by regexp '%v'", DomainPresent(domain), re.String())
 					continue forRegexpCheckDomain
@@ -563,16 +520,16 @@ forRegexpCheckDomain:
 	}
 
 	// add domains from file
-	if len(allowedDomains) != len(domainsToObtain) && *whiteListFile != "" {
+	if len(allowedDomains) != len(domainsToObtain) && *srvdata.Flags.whiteListFile != "" {
 		logrus.Debug("Check file whitelist")
 
 		func() {
-			f, err := os.Open(*whiteListFile)
+			f, err := os.Open(*srvdata.Flags.whiteListFile)
 			if f != nil {
 				defer f.Close()
 			}
 			if err != nil {
-				logrus.Error("Can't open white list file '%v': %v\n", *whiteListFile, err)
+				logrus.Error("Can't open white list file '%v': %v\n", *srvdata.Flags.whiteListFile, err)
 				return
 			}
 
@@ -611,7 +568,7 @@ forRegexpCheckDomain:
 		return nil, errors.New("Reject domain by regexp")
 	}
 
-	cert, err = acmeService.CreateCertificate(ctx, allowedDomains, domain)
+	cert, err = srvdata.acmeService.CreateCertificate(ctx, allowedDomains, domain)
 	if err == nil {
 		certificateCachePut(baseDomain, cert)
 
@@ -646,7 +603,7 @@ func createTlsConfig() *tls.Config {
 		"CURVEP384": tls.CurveP384,
 		"CURVEP521": tls.CurveP521,
 	}
-	for _, name := range strings.Split(*cryptoCurvePreferences, ",") {
+	for _, name := range strings.Split(*srvdata.Flags.cryptoCurvePreferences, ",") {
 		nameUpper := strings.ToUpper(strings.TrimSpace(name))
 		if nameUpper == "" {
 			continue
@@ -663,7 +620,7 @@ func createTlsConfig() *tls.Config {
 		logrus.Fatalf("Unknown curve name: '%s'", name)
 	}
 
-	switch strings.TrimSpace(*minTLSVersion) {
+	switch strings.TrimSpace(*srvdata.Flags.minTLSVersion) {
 	case "":
 	// pass
 	case "ssl3":
@@ -675,7 +632,7 @@ func createTlsConfig() *tls.Config {
 	case "tls12":
 		tlsConfig.MinVersion = tls.VersionTLS12
 	default:
-		logrus.Fatalf("Doesn't know tls version '%v', use default. cid '%v'", *minTLSVersion)
+		logrus.Fatalf("Doesn't know tls version '%v', use default. cid '%v'", *srvdata.Flags.minTLSVersion)
 	}
 	return tlsConfig
 }
@@ -684,11 +641,11 @@ func getTargetAddr(cid ConnectionID, in net.Addr) (net.TCPAddr, error) {
 	var target net.TCPAddr
 
 	var mappedTarget *net.TCPAddr
-	if targetMap != nil {
-		mappedTarget = targetMap[in.String()]
+	if srvdata.targetMap != nil {
+		mappedTarget = srvdata.targetMap[in.String()]
 	}
 	if mappedTarget == nil {
-		target = *paramTargetTcpAddr
+		target = *srvdata.paramTargetTcpAddr
 	} else {
 		target = *mappedTarget
 		logrus.Debugf("Select target address by target map (cid %v) '%v' -> '%v'", cid, in, target)
@@ -702,50 +659,15 @@ func getTargetAddr(cid ConnectionID, in net.Addr) (net.TCPAddr, error) {
 		}
 		target.IP = receiveAddr.IP
 	} else {
-		target.IP = paramTargetTcpAddr.IP
+		target.IP = srvdata.paramTargetTcpAddr.IP
 	}
 
 	if target.Port == 0 {
-		target.Port = paramTargetTcpAddr.Port
+		target.Port = srvdata.paramTargetTcpAddr.Port
 	}
 
 	logrus.Debugf("Target address for '%v' (cid '%v'): %v", in, cid, target)
 	return target, nil
-}
-
-func handleTcpConnection(cid ConnectionID, in *net.TCPConn) {
-	logrus.Debugf("Receive incoming connection from %v, cid: '%v'", in.RemoteAddr(), cid)
-
-	//nolint:errcheck
-	in.SetKeepAlive(true)
-	//nolint:errcheck
-	in.SetKeepAlivePeriod(*tcpKeepAliveInterval)
-
-	target, err := getTargetAddr(cid, in.LocalAddr())
-	if err != nil {
-		logrus.Errorf("Can't get target IP/port for '%v' (cid '%v'): %v", in.RemoteAddr(), cid, err)
-		return
-	}
-
-	// handle ssl
-	tlsConn := tls.Server(in, createTlsConfig())
-	err = tlsConn.Handshake()
-	logrus.Debugf("tls ciper, cid %v: %v", cid, tlsConn.ConnectionState().CipherSuite)
-	if err == nil {
-		logrus.Debugf("Handshake for incoming cid '%v': %v", cid, tlsConn.RemoteAddr())
-	} else {
-		logrus.Infof("Error in tls handshake from '%v' cid '%v' :%v", tlsConn.RemoteAddr(), cid, err)
-		tlsConn.Close()
-		return
-	}
-
-	serverName := tlsConn.ConnectionState().ServerName
-	if serverName == "" {
-		serverName = *defaultDomain + " (by default)"
-	}
-	//logrus.Infof("Start proxy from '%v' to http://%v (%v) cid '%v'", in.RemoteAddr(), DomainPresent(serverName), &target, cid)
-	logrus.Infof("Start proxy from '%v' to http://%v (%v) cid '%v'", in.RemoteAddr(), serverName, &target, cid)
-	startProxy(cid, target, tlsConn)
 }
 
 func uniqueAppend(s [][]byte, line []byte) [][]byte {
@@ -763,12 +685,10 @@ func prepare() {
 	var err error
 
 	// Init
-	if *proxyMode != PROXYMODE_HTTP && *proxyMode != PROXYMODE_TCP && *proxyMode != PROXYMODE_HTTP_BUILTIN {
-		logrus.Panicf("Unknow proxy mode: %v", *proxyMode)
-	}
-	logrus.Infof("Proxy mode: %v", *proxyMode)
+	*srvdata.Flags.proxyMode = PROXYMODE_HTTP_BUILTIN
+	logrus.Infof("Proxy mode: %v", *srvdata.Flags.proxyMode)
 
-	for _, ignoreDomain := range strings.Split(*nonCertDomains, ",") {
+	for _, ignoreDomain := range strings.Split(*srvdata.Flags.nonCertDomains, ",") {
 		ignoreDomain = strings.TrimSpace(ignoreDomain)
 		if ignoreDomain == "" {
 			continue
@@ -778,41 +698,41 @@ func prepare() {
 			logrus.Errorf("Bad ignore domain regexp '%v': %v", ignoreDomain, err)
 		}
 		if ignoreDomainRE != nil {
-			nonCertDomainsRegexps = append(nonCertDomainsRegexps, ignoreDomainRE)
+			srvdata.nonCertDomainsRegexps = append(srvdata.nonCertDomainsRegexps, ignoreDomainRE)
 		}
 	}
 	if logrus.GetLevel() >= logrus.InfoLevel {
 		regexps := []string{}
-		for _, re := range nonCertDomainsRegexps {
+		for _, re := range srvdata.nonCertDomainsRegexps {
 			regexps = append(regexps, re.String())
 		}
 		logrus.Info("Non cert domain regexps: ", "['"+strings.Join(regexps, "', '")+"']")
 	}
 
 	// cut wellknown header about client ip
-	cutHeaders = uniqueAppend(cutHeaders, []byte(strings.ToUpper("X-Forwarded-For")))
-	cutHeaders = uniqueAppend(cutHeaders, []byte(strings.ToUpper("X-Real-IP")))
+	srvdata.cutHeaders = uniqueAppend(srvdata.cutHeaders, []byte(strings.ToUpper("X-Forwarded-For")))
+	srvdata.cutHeaders = uniqueAppend(srvdata.cutHeaders, []byte(strings.ToUpper("X-Real-IP")))
 
-	realIPHeaderNames = uniqueAppend(realIPHeaderNames, []byte("X-Forwarded-For"))
-	realIPHeaderNames = uniqueAppend(realIPHeaderNames, []byte("X-Real-IP"))
+	srvdata.realIPHeaderNames = uniqueAppend(srvdata.realIPHeaderNames, []byte("X-Forwarded-For"))
+	srvdata.realIPHeaderNames = uniqueAppend(srvdata.realIPHeaderNames, []byte("X-Real-IP"))
 
-	for _, line := range strings.Split(*realIPHeader, ",") {
+	for _, line := range strings.Split(*srvdata.Flags.realIPHeader, ",") {
 		line = strings.TrimSpace(line)
 		if line != "" {
-			realIPHeaderNames = uniqueAppend(realIPHeaderNames, []byte(line))
-			cutHeaders = uniqueAppend(cutHeaders, []byte(strings.ToUpper(line)))
+			srvdata.realIPHeaderNames = uniqueAppend(srvdata.realIPHeaderNames, []byte(line))
+			srvdata.cutHeaders = uniqueAppend(srvdata.cutHeaders, []byte(strings.ToUpper(line)))
 			if !strings.EqualFold(line, "X-Forwarded-For") && !strings.EqualFold(line, "X-Real-IP") { // X-Forwarded-For/X-Real-IP - appended auto by reverse proxy
-				realIPHeaderNamesStrings = append(realIPHeaderNamesStrings, textproto.CanonicalMIMEHeaderKey(line))
+				srvdata.realIPHeaderNamesStrings = append(srvdata.realIPHeaderNamesStrings, textproto.CanonicalMIMEHeaderKey(line))
 			}
 		}
 	}
 
-	for _, addHeader := range strings.Split(*additionalHeadersParam, ",") {
+	for _, addHeader := range strings.Split(*srvdata.Flags.additionalHeadersParam, ",") {
 		var headerName, headerVal string
 
 		headerParts := strings.SplitN(addHeader, "=", 2)
 		if len(headerParts) > 0 {
-			cutHeaders = uniqueAppend(cutHeaders, []byte(strings.ToUpper(headerParts[0])))
+			srvdata.cutHeaders = uniqueAppend(srvdata.cutHeaders, []byte(strings.ToUpper(headerParts[0])))
 			headerName = headerParts[0]
 		}
 		buf := &bytes.Buffer{}
@@ -823,13 +743,13 @@ func prepare() {
 			headerVal = headerParts[1]
 		}
 		buf.WriteString("\r\n")
-		additionalHeaders = append(additionalHeaders, buf.Bytes()...)
-		additionalHeadersStringPairs = append(additionalHeadersStringPairs, [2]string{textproto.CanonicalMIMEHeaderKey(headerName), headerVal})
+		srvdata.additionalHeaders = append(srvdata.additionalHeaders, buf.Bytes()...)
+		srvdata.additionalHeadersStringPairs = append(srvdata.additionalHeadersStringPairs, [2]string{textproto.CanonicalMIMEHeaderKey(headerName), headerVal})
 	}
 
-	if *inMemoryCertCount > 0 {
-		logrus.Infof("Create memory cache for '%v' certificates", *inMemoryCertCount)
-		certMemCache, err = lru.New(*inMemoryCertCount)
+	if *srvdata.Flags.inMemoryCertCount > 0 {
+		logrus.Infof("Create memory cache for '%v' certificates", *srvdata.Flags.inMemoryCertCount)
+		certMemCache, err = lru.New(*srvdata.Flags.inMemoryCertCount)
 		if err != nil {
 			logrus.Errorf("Can't create memory cache:", err)
 			certMemCache = nil
@@ -837,17 +757,17 @@ func prepare() {
 	} else {
 		logrus.Info("Memory cache turned off")
 	}
-	if *certDir == "-" {
-		*certDir = ""
+	if *srvdata.Flags.certDir == "-" {
+		*srvdata.Flags.certDir = ""
 	}
 
-	switch *keepAliveModeS {
+	switch *srvdata.Flags.keepAliveModeS {
 	case KEEPALIVE_TRANSPARENT_STRING:
 		keepAliveMode = KEEPALIVE_TRANSPARENT
 	case KEEPALIVE_NO_BACKEND_STRING:
 		keepAliveMode = KEEPALIVE_NO_BACKEND
 	default:
-		logrus.Errorf("Bad keepalive mode: '%v'. Used '%v' instead.", *keepAliveModeS, KEEPALIVE_TRANSPARENT_STRING)
+		logrus.Errorf("Bad keepalive mode: '%v'. Used '%v' instead.", *srvdata.Flags.keepAliveModeS, KEEPALIVE_TRANSPARENT_STRING)
 		keepAliveMode = KEEPALIVE_TRANSPARENT
 	}
 	logrus.Infof("KeepAlive mode: %v", keepAliveMode)
@@ -856,24 +776,24 @@ func prepare() {
 	logrus.Infof("Working dir '%v', err: %v", workingDir, err)
 
 	// targetConn
-	targetAddrS := *targetConnString
-	if !strings.ContainsRune(*targetConnString, ':') || // doesn't contain colon (only ipv4 or domain name)
-		len(*targetConnString) > 0 && (*targetConnString)[len(*targetConnString)-1] == ']' { // is ipv6 only, without port
+	targetAddrS := *srvdata.Flags.targetConnString
+	if !strings.ContainsRune(*srvdata.Flags.targetConnString, ':') || // doesn't contain colon (only ipv4 or domain name)
+		len(*srvdata.Flags.targetConnString) > 0 && (*srvdata.Flags.targetConnString)[len(*srvdata.Flags.targetConnString)-1] == ']' { // is ipv6 only, without port
 		targetAddrS += ":80"
 	}
-	paramTargetTcpAddr, err = net.ResolveTCPAddr("tcp", targetAddrS)
+	srvdata.paramTargetTcpAddr, err = net.ResolveTCPAddr("tcp", targetAddrS)
 	if err != nil {
-		logrus.Panicf("Can't resolve target addr '%v': %v", targetConnString, err)
+		logrus.Panicf("Can't resolve target addr '%v': %v", *srvdata.Flags.targetConnString, err)
 	}
-	logrus.Info("Target addr: ", paramTargetTcpAddr)
+	logrus.Info("Target addr: ", srvdata.paramTargetTcpAddr)
 
-	subdomainPrefixedForUnion = strings.Split(*subdomainsUnionS, ",")
-	for i := range subdomainPrefixedForUnion {
-		subdomainPrefixedForUnion[i] = subdomainPrefixedForUnion[i] + "."
+	srvdata.subdomainPrefixedForUnion = strings.Split(*srvdata.Flags.subdomainsUnionS, ",")
+	for i := range srvdata.subdomainPrefixedForUnion {
+		srvdata.subdomainPrefixedForUnion[i] = srvdata.subdomainPrefixedForUnion[i] + "."
 	}
-	logrus.Info("Subdomain union: ", subdomainPrefixedForUnion)
+	logrus.Info("Subdomain union: ", srvdata.subdomainPrefixedForUnion)
 
-	for _, whiteListDomain := range strings.Split(*whiteList, ",") {
+	for _, whiteListDomain := range strings.Split(*srvdata.Flags.whiteList, ",") {
 		whiteListDomain = strings.TrimSpace(whiteListDomain)
 		if whiteListDomain == "" {
 			continue
@@ -882,56 +802,56 @@ func prepare() {
 			sRegexp := whiteListDomain[len("re:"):]
 			re, err := regexp.Compile(sRegexp)
 			if err == nil {
-				whiteListFromParamRe = append(whiteListFromParamRe, re)
+				srvdata.whiteListFromParamRe = append(srvdata.whiteListFromParamRe, re)
 			} else {
 				logrus.Errorf("Bad regexp in whitelist domain args '%v': %v", sRegexp, err)
 			}
 
 		} else {
-			whiteListFromParam = append(whiteListFromParam, whiteListDomain)
+			srvdata.whiteListFromParam = append(srvdata.whiteListFromParam, whiteListDomain)
 		}
 	}
-	sort.Strings(whiteListFromParam)
-	logrus.Infof("Domains whitelist: %v", whiteListFromParam)
-	logrus.Infof("Domains whitelist regexps: %v", whiteListFromParamRe)
+	sort.Strings(srvdata.whiteListFromParam)
+	logrus.Infof("Domains whitelist: %v", srvdata.whiteListFromParam)
+	logrus.Infof("Domains whitelist regexps: %v", srvdata.whiteListFromParamRe)
 
 	// init service
 	var state stateStruct
-	stateBytes, err := ioutil.ReadFile(*stateFilePath)
+	stateBytes, err := ioutil.ReadFile(*srvdata.Flags.stateFilePath)
 	if err == nil {
 		err = json.Unmarshal(stateBytes, &state)
 		if err != nil {
-			logrus.Errorf("Can't parse state file '%v': %v", *stateFilePath, err)
+			logrus.Errorf("Can't parse state file '%v': %v", *srvdata.Flags.stateFilePath, err)
 		}
 	} else {
-		logrus.Errorf("Can't read state file '%v': %v", *stateFilePath, err)
+		logrus.Errorf("Can't read state file '%v': %v", *srvdata.Flags.stateFilePath, err)
 	}
 
 	// bindTo
-	if *bindToS == "" {
-		bindTo = []net.TCPAddr{
+	if *srvdata.Flags.bindToS == "" {
+		srvdata.bindTo = []net.TCPAddr{
 			{IP: net.IPv6unspecified, Port: DEFAULT_BIND_PORT},
 			{IP: net.IPv4zero, Port: DEFAULT_BIND_PORT},
 		}
 	} else {
-		bindTo = parseAddressList(*bindToS, DEFAULT_BIND_PORT)
+		srvdata.bindTo = parseAddressList(*srvdata.Flags.bindToS, DEFAULT_BIND_PORT)
 	}
 
-	if len(bindTo) == 0 {
+	if len(srvdata.bindTo) == 0 {
 		logrus.Fatal("Nothing address to bind")
 	}
 
 	// bindHttpValidationTo
-	if *bindHttpValidationToS == "" {
-		bindHttpValidationTo = []net.TCPAddr{
+	if *srvdata.Flags.bindHTTPValidationToS == "" {
+		srvdata.bindHttpValidationTo = []net.TCPAddr{
 			{IP: net.IPv6unspecified, Port: DEFAULT_BIND_HTTP_VALIDATION_PORT},
 			{IP: net.IPv4zero, Port: DEFAULT_BIND_HTTP_VALIDATION_PORT},
 		}
 	} else {
-		bindHttpValidationTo = parseAddressList(*bindHttpValidationToS, DEFAULT_BIND_HTTP_VALIDATION_PORT)
+		srvdata.bindHttpValidationTo = parseAddressList(*srvdata.Flags.bindHTTPValidationToS, DEFAULT_BIND_HTTP_VALIDATION_PORT)
 	}
 
-	if len(bindTo) == 0 {
+	if len(srvdata.bindTo) == 0 {
 		logrus.Warningf("It has no bind port for http validation. Can use only tls validation.")
 	}
 
@@ -939,9 +859,9 @@ func prepare() {
 	logrus.Infof("Allowed IPs on start: %v", allowedIps)
 
 	// targetMap
-	if *mapTargetS != "" {
-		targetMap = make(map[string]*net.TCPAddr, strings.Count(*mapTargetS, ",")+1)
-		for _, m := range strings.Split(*mapTargetS, ",") {
+	if *srvdata.Flags.mapTargetS != "" {
+		srvdata.targetMap = make(map[string]*net.TCPAddr, strings.Count(*srvdata.Flags.mapTargetS, ",")+1)
+		for _, m := range strings.Split(*srvdata.Flags.mapTargetS, ",") {
 			equalIndex := strings.Index(m, "=")
 			if equalIndex < 0 {
 				logrus.Errorf("Error in target-maps, doesn't contain equal sign: %v", m)
@@ -954,34 +874,34 @@ func prepare() {
 				continue
 			}
 			if receiver.Port == 0 {
-				receiver.Port = bindTo[0].Port
+				receiver.Port = srvdata.bindTo[0].Port
 			}
 
 			target := resolveAddr(m[equalIndex+1:])
 			if target.Port == 0 {
-				target.Port = paramTargetTcpAddr.Port
+				target.Port = srvdata.paramTargetTcpAddr.Port
 			}
-			targetMap[receiver.String()] = target
+			srvdata.targetMap[receiver.String()] = target
 		}
 	}
 	if logrus.GetLevel() >= logrus.InfoLevel {
-		for k, v := range targetMap {
+		for k, v := range srvdata.targetMap {
 			logrus.Printf("Map target '%v' -> '%v'", k, v)
 		}
 	}
 
-	acmeService = &acmeStruct{}
-	acmeService.timeToRenew = *timeToRenew
-	if *acmeTestServer {
-		acmeService.serverAddress = LETSENCRYPT_STAGING_API_URL
+	srvdata.acmeService = &acmeStruct{}
+	srvdata.acmeService.timeToRenew = *srvdata.Flags.timeToRenew
+	if *srvdata.Flags.acmeTestServer {
+		srvdata.acmeService.serverAddress = LETSENCRYPT_STAGING_API_URL
 	} else {
-		acmeService.serverAddress = *acmeServerUrl
+		srvdata.acmeService.serverAddress = *srvdata.Flags.acmeServerUrl
 	}
 
-	if *serviceAction == "" {
+	if *srvdata.Flags.serviceAction == "" {
 		if state.PrivateKey == nil {
 			logrus.Info("Generate private keys")
-			state.PrivateKey, err = rsa.GenerateKey(cryptorand.Reader, *privateKeyBits)
+			state.PrivateKey, err = rsa.GenerateKey(cryptorand.Reader, *srvdata.Flags.privateKeyBits)
 			state.changed = true
 			if err != nil {
 				logrus.Panic("Can't generate private key")
@@ -993,51 +913,56 @@ func prepare() {
 		saveState(state)
 	}
 
-	acmeService.privateKey = state.PrivateKey
+	srvdata.acmeService.privateKey = state.PrivateKey
 
-	acmeService.Init()
+	srvdata.acmeService.Init()
 
 	skipDomainsStartCleaner()
 }
 
 func saveState(state stateStruct) {
 	if state.changed {
-		logrus.Infof("Saving state to '%v'", *stateFilePath)
+		logrus.Infof("Saving state to '%v'", *srvdata.Flags.stateFilePath)
 	} else {
 		logrus.Debug("Skip save state becouse it isn't changed")
 		return
 	}
 	stateBytes, err := json.MarshalIndent(&state, "", "    ")
 	if err != nil {
-		logrus.Errorf("Can't save state to file '%v': %v", *stateFilePath, err)
+		logrus.Errorf("Can't save state to file '%v': %v", *srvdata.Flags.stateFilePath, err)
 		return
 	}
-	err = ioutil.WriteFile(*stateFilePath+".new", stateBytes, STATE_FILEMODE)
+	err = ioutil.WriteFile(*srvdata.Flags.stateFilePath+".new", stateBytes, STATE_FILEMODE)
 	if err != nil {
-		logrus.Errorf("Error while write state bytes to file '%v': %v", *stateFilePath+".new", err)
+		logrus.Errorf("Error while write state bytes to file '%v': %v", *srvdata.Flags.stateFilePath+".new", err)
 		return
 	}
 
-	if _, err := os.Stat(*stateFilePath); !os.IsNotExist(err) {
-		logrus.Infof("Rename current state file '%v' -> '%v'", *stateFilePath, *stateFilePath+".old")
+	if _, err := os.Stat(*srvdata.Flags.stateFilePath); !os.IsNotExist(err) {
+		logrus.Infof("Rename current state file '%v' -> '%v'", *srvdata.Flags.stateFilePath, *srvdata.Flags.stateFilePath+".old")
 
-		err = os.Rename(*stateFilePath, *stateFilePath+".old")
+		err = os.Rename(*srvdata.Flags.stateFilePath, *srvdata.Flags.stateFilePath+".old")
 		if err != nil {
-			logrus.Errorf("Can't rename '%v' to '%v': %v", *stateFilePath, *stateFilePath+".old", err)
+			logrus.Errorf("Can't rename '%v' to '%v': %v", *srvdata.Flags.stateFilePath, *srvdata.Flags.stateFilePath+".old", err)
 		}
 	} else {
-		logrus.Infof("Create new state file '%v'", *stateFilePath)
+		logrus.Infof("Create new state file '%v'", *srvdata.Flags.stateFilePath)
 	}
 
-	err = os.Rename(*stateFilePath+".new", *stateFilePath)
+	err = os.Rename(*srvdata.Flags.stateFilePath+".new", *srvdata.Flags.stateFilePath)
 	if err != nil {
-		logrus.Errorf("Can't rename '%v' to '%v': %v", *stateFilePath+".new", *stateFilePath, err)
+		logrus.Errorf("Can't rename '%v' to '%v': %v", *srvdata.Flags.stateFilePath+".new", *srvdata.Flags.stateFilePath, err)
 	}
 }
 
-// return nil if can't start any listeners
-func startListeners(addresses []net.TCPAddr) []*net.TCPListener {
-	listeners := make([]*net.TCPListener, 0, len(bindTo))
+// return err if can't start all listeners
+func startListeners(addresses []net.TCPAddr) ([]*net.TCPListener, error) {
+	if len(addresses) == 0 {
+		err := errors.New("listen address list is empty")
+		logrus.Errorf("startListeners: %s", err)
+		return nil, err
+	}
+	listeners := make([]*net.TCPListener, 0, len(srvdata.bindTo))
 	for _, bindAddr := range addresses {
 		// Start listen
 		logrus.Infof("Start listen: %v", bindAddr)
@@ -1047,19 +972,17 @@ func startListeners(addresses []net.TCPAddr) []*net.TCPListener {
 			listeners = append(listeners, listener)
 		} else {
 			logrus.Errorf("Can't start listen on '%v': %v", bindAddr, err)
+			return nil, err
 		}
 	}
-	if len(listeners) == 0 {
-		return nil
-	}
-	return listeners
+	return listeners, nil
 }
 
 func startTimeLogRotator(logger *lumberjack.Logger) {
 	for {
 		now := time.Now()
 		var sleepUntil time.Time
-		switch *logrotateTime {
+		switch *srvdata.Flags.logrotateTime {
 		case "", "none":
 			return // no rotate by time
 		case "minutely":
@@ -1079,20 +1002,31 @@ func startTimeLogRotator(logger *lumberjack.Logger) {
 		case "yearly":
 			sleepUntil = time.Date(now.Year()+1, 1, 1, 0, 0, 0, 0, time.Local)
 		default:
-			logrus.Errorf("Doesn't know logrotate time interval: '%v'. Turn off time rotation.", *logrotateTime)
+			logrus.Errorf("Doesn't know logrotate time interval: '%v'. Turn off time rotation.", *srvdata.Flags.logrotateTime)
 			return
 		}
 
 		time.Sleep(sleepUntil.Sub(now))
-		logrus.Info("Rotate log:", *logrotateTime)
+		logrus.Info("Rotate log:", *srvdata.Flags.logrotateTime)
 		//nolint:errcheck
 		logger.Rotate()
 	}
 }
 
-func startWork() (err error) {
-	listeners := startListeners(bindTo)
-	listenersHttpValidation := startListeners(bindHttpValidationTo)
+func startWork(closeCh chan int) error {
+	listeners, err := startListeners(srvdata.bindTo)
+	if err != nil {
+		closeCh <- 1
+		close(closeCh)
+		return err
+	}
+
+	listenersHttpValidation, err := startListeners(srvdata.bindHttpValidationTo)
+	if err != nil {
+		closeCh <- 1
+		close(closeCh)
+		return err
+	}
 
 	acceptConnectionsHttpValidation(listenersHttpValidation)
 
@@ -1105,7 +1039,7 @@ func startWork() (err error) {
 		logrus.Error(mess)
 		return errors.New(mess)
 	} else {
-		acceptConnectionsTLS(listeners)
+		acceptConnectionsBuiltinProxy(listeners)
 		return nil
 	}
 }
@@ -1134,7 +1068,7 @@ func stringsSortedContains(slice []string, s string) bool {
 }
 
 func isBaseDomainLocked(domain string) bool {
-	lockFilePath := filepath.Join(*certDir, domain+".lock")
+	lockFilePath := filepath.Join(*srvdata.Flags.certDir, domain+".lock")
 	_, err := os.Stat(lockFilePath)
 	fileExists := !os.IsNotExist(err)
 	return fileExists

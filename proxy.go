@@ -52,7 +52,7 @@ var (
 )
 
 func connectTo(cid ConnectionID, targetAddr net.TCPAddr) (conn *net.TCPConn, err error) {
-	targetConnCommon, err := net.DialTimeout("tcp", targetAddr.String(), *targetConnTimeout)
+	targetConnCommon, err := net.DialTimeout("tcp", targetAddr.String(), *srvdata.Flags.targetConnTimeout)
 	if err != nil {
 		logrus.Warnf("Can't connect to target '%v' cid '%v': %v", targetAddr.String(), cid, err)
 		return nil, err
@@ -62,7 +62,7 @@ func connectTo(cid ConnectionID, targetAddr net.TCPAddr) (conn *net.TCPConn, err
 	//nolint:errcheck
 	targetConn.SetKeepAlive(true)
 	//nolint:errcheck
-	targetConn.SetKeepAlivePeriod(*tcpKeepAliveInterval)
+	targetConn.SetKeepAlivePeriod(*srvdata.Flags.tcpKeepAliveInterval)
 	return targetConn, nil
 }
 
@@ -198,7 +198,7 @@ readHeaderLines:
 		headerName := headerStart[:len(headerStart)-1] // Cut trailing colon from start
 
 		skipHeader := false
-		for _, ownHeader := range cutHeaders {
+		for _, ownHeader := range srvdata.cutHeaders {
 			if bytes.EqualFold(ownHeader, headerName) {
 				skipHeader = true
 				break
@@ -292,7 +292,7 @@ readHeaderLines:
 	headerBuf.Reset()
 
 	// Write real IP
-	for _, header := range realIPHeaderNames {
+	for _, header := range srvdata.realIPHeaderNames {
 		headerBuf.Write(header)
 		headerBuf.WriteString(": ")
 		headerBuf.WriteString(remoteAddrString)
@@ -301,8 +301,8 @@ readHeaderLines:
 	}
 
 	// Write CID
-	if *connectionIdHeader != "" {
-		headerBuf.WriteString(*connectionIdHeader)
+	if *srvdata.Flags.connectionIdHeader != "" {
+		headerBuf.WriteString(*srvdata.Flags.connectionIdHeader)
 		headerBuf.WriteString(": ")
 		headerBuf.WriteString(cid.String())
 		headerBuf.WriteString("\r\n")
@@ -320,7 +320,7 @@ readHeaderLines:
 		panic(errors.New("Unknown proxy keepalive mode"))
 	}
 
-	headerBuf.Write(additionalHeaders)
+	headerBuf.Write(srvdata.additionalHeaders)
 	headerBuf.Write([]byte("\r\n")) // end http headers
 	logrus.Debugf("Add headers. '%v' -> '%v': '%s'", sourceConn.RemoteAddr(), targetConn.RemoteAddr(), headerBuf.Bytes())
 
@@ -454,18 +454,6 @@ func proxyHTTPBody(cid ConnectionID, dst, src net.Conn, headers proxyHTTPHeaders
 	return err
 }
 
-func startProxy(cid ConnectionID, targetAddr net.TCPAddr, in net.Conn) {
-	switch *proxyMode {
-	case PROXYMODE_HTTP:
-		startProxyHTTP(cid, targetAddr, in)
-	case PROXYMODE_TCP:
-		startProxyTCP(cid, targetAddr, in)
-	default:
-		in.Close()
-		logrus.Panicf("startProxy: unknow proxy mode cid '%v': %v", cid, *proxyMode)
-	}
-}
-
 func startProxyHTTP(cid ConnectionID, targetAddr net.TCPAddr, customerConn net.Conn) {
 	defer customerConn.Close()
 
@@ -497,10 +485,10 @@ func startProxyHTTP(cid ConnectionID, targetAddr net.TCPAddr, customerConn net.C
 		}
 		logrus.Debugf("Cid '%v'. Start proxy request", cid)
 		//nolint:errcheck
-		customerConn.SetReadDeadline(time.Now().Add(*keepAliveCustomerTimeout))
+		customerConn.SetReadDeadline(time.Now().Add(*srvdata.Flags.keepAliveCustomerTimeout))
 		requestHeadersRes := proxyHTTPHeaders(cid, backendConn, customerConn, proxyKeepAliveModeToBackend)
 		//nolint:errcheck
-		customerConn.SetReadDeadline(time.Now().Add(*maxRequestTime))
+		customerConn.SetReadDeadline(time.Now().Add(*srvdata.Flags.maxRequestTime))
 
 		if requestHeadersRes.Err != nil {
 			logrus.Debugf("Cid '%v'. Can't read headers: %v", cid, requestHeadersRes.Err)
@@ -546,35 +534,6 @@ func startProxyHTTP(cid ConnectionID, targetAddr net.TCPAddr, customerConn net.C
 		}
 	}
 
-}
-
-func startProxyTCP(cid ConnectionID, targetAddr net.TCPAddr, sourceConn net.Conn) {
-	targetConn, err := connectTo(cid, targetAddr)
-	if err == nil {
-		logrus.Infof("Start tcp-proxy connection from '%v' to'%v' cid '%v'", sourceConn.RemoteAddr(), targetConn.RemoteAddr(), cid)
-	} else {
-		logrus.Warnf("CID '%v'. Can't connect to target addr '%v': %v", cid, targetAddr, err)
-		return
-	}
-
-	go func() {
-		buf := netbufGet()
-		defer netbufPut(buf)
-
-		_, err := io.CopyBuffer(targetConn, sourceConn, buf)
-		logrus.Debugf("Connection closed with error2 '%v' -> '%v' cid '%v': %v", sourceConn.RemoteAddr(), targetConn.RemoteAddr(), cid, err)
-		sourceConn.Close()
-		targetConn.Close()
-	}()
-	go func() {
-		buf := netbufGet()
-		defer netbufPut(buf)
-
-		_, err := io.CopyBuffer(sourceConn, targetConn, buf)
-		logrus.Debugf("Connection closed with error3 '%v' -> '%v' cid '%v': %v", sourceConn.RemoteAddr(), targetConn.RemoteAddr(), cid, err)
-		sourceConn.Close()
-		targetConn.Close()
-	}()
 }
 
 func isHexDigit(b byte) bool {

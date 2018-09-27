@@ -45,7 +45,7 @@ func (pool *acmeClientPool) Get(ctx context.Context) (*acmeapi.Client, error) {
 		AccountKey:   pool.privateKey,
 		DirectoryURL: pool.serverAddress,
 	}
-	if *acmeSslCheckDisable {
+	if *srvdata.Flags.acmeSslCheckDisable {
 		client.HTTPClient = &http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{

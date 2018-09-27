@@ -37,12 +37,12 @@ func acceptConnectionsBuiltinProxy(listeners []*net.TCPListener) {
 			if req.Header == nil {
 				req.Header = make(http.Header)
 			}
-			for _, pair := range additionalHeadersStringPairs {
+			for _, pair := range srvdata.additionalHeadersStringPairs {
 				req.Header.Set(pair[0], pair[1])
 			}
 			clientIP, _, err := net.SplitHostPort(req.RemoteAddr)
 			if err == nil {
-				for _, realIpHeader := range realIPHeaderNamesStrings {
+				for _, realIpHeader := range srvdata.realIPHeaderNamesStrings {
 					req.Header.Set(realIpHeader, clientIP)
 				}
 			}
@@ -57,8 +57,8 @@ func acceptConnectionsBuiltinProxy(listeners []*net.TCPListener) {
 				logrus.Infof("BuiltinProxy from '%v' to http://%v (%v)", clientIP, asciiDomain, targetAddrString)
 			}
 
-			if *connectionIdHeader != "" {
-				req.Header.Set(*connectionIdHeader, "TODO")
+			if *srvdata.Flags.connectionIdHeader != "" {
+				req.Header.Set(*srvdata.Flags.connectionIdHeader, "TODO")
 			}
 
 		}
@@ -72,6 +72,12 @@ func acceptConnectionsBuiltinProxy(listeners []*net.TCPListener) {
 		server := http.Server{}
 		server.TLSConfig = createTlsConfig()
 		server.Handler = proxyToBackend
+
+		// TODO: h2server
+		//h2server := h2quic.Server{
+		//	Server: &server,
+		//}
+		//err = h2server.serveImpl(server.TLSConfig, nil)
 
 		switch keepAliveMode {
 		case KEEPALIVE_TRANSPARENT:
@@ -94,10 +100,10 @@ func acceptConnectionsBuiltinProxy(listeners []*net.TCPListener) {
 				DisableKeepAlives: true,
 			}
 		default:
-			logrus.Errorf("Unknow keep alive mode for buil-in proxy: %v (%v)", *keepAliveModeS, keepAliveMode)
+			logrus.Errorf("Unknow keep alive mode for buil-in proxy: %v (%v)", *srvdata.Flags.keepAliveModeS, keepAliveMode)
 		}
 
-		server.ReadTimeout = *maxRequestTime
+		server.ReadTimeout = *srvdata.Flags.maxRequestTime
 
 		go func(listener net.Listener) {
 			err := server.Serve(listener)
@@ -124,6 +130,6 @@ func (ln tcpKeepAliveListener) Accept() (c net.Conn, err error) {
 	//nolint:errcheck
 	tc.SetKeepAlive(true)
 	//nolint:errcheck
-	tc.SetKeepAlivePeriod(*tcpKeepAliveInterval)
+	tc.SetKeepAlivePeriod(*srvdata.Flags.tcpKeepAliveInterval)
 	return tc, nil
 }

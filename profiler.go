@@ -25,7 +25,7 @@ Disallow: /`))
 
 	profilerServer := &http.Server{}
 	profilerServer.Handler = profilerMux
-	profilerServer.Addr = *profilerBindAddress
+	profilerServer.Addr = *srvdata.Flags.profilerBindAddress
 	logrus.Infof("Start profiler with bind to: '%v'", profilerServer.Addr)
 	err := profilerServer.ListenAndServe()
 	logrus.Errorf("Can't start profiler: %v", err)
@@ -38,12 +38,12 @@ func (h CheckProfilerAccessHandler) ServeHTTP(resp http.ResponseWriter, req *htt
 	if cookie != nil {
 		cPassword = cookie.Value
 	}
-	if password == *profilerPassword || cPassword == *profilerPassword {
+	if password == *srvdata.Flags.profilerPassword || cPassword == *srvdata.Flags.profilerPassword {
 		if cPassword == "" {
 			cookie := &http.Cookie{}
 			cookie.Path = "/debug/pprof/"
 			cookie.Name = "password"
-			cookie.Value = *profilerPassword
+			cookie.Value = *srvdata.Flags.profilerPassword
 			http.SetCookie(resp, cookie)
 		}
 		h(resp, req)

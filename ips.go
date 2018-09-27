@@ -55,7 +55,7 @@ func getAllowIPs() ipSlice {
 		return nil
 	}
 
-	if *allowIPRefreshInterval == 0 {
+	if *srvdata.Flags.allowIPRefreshInterval == 0 {
 		res := forceReadAllowedIPs()
 		logrus.Infof("Update allowed ips to: %v", res)
 		return res
@@ -70,7 +70,7 @@ func getAllowIPs() ipSlice {
 			res := forceReadAllowedIPs()
 			logrus.Infof("Update allowed ips to: %v", res)
 			globalAllowedIPs.Store(res)
-			globalAllowedIPsNextUpdateTime.Store(time.Now().Add(*allowIPRefreshInterval))
+			globalAllowedIPsNextUpdateTime.Store(time.Now().Add(*srvdata.Flags.allowIPRefreshInterval))
 		}
 	}
 	ips := globalAllowedIPs.Load().(ipSlice)
@@ -111,7 +111,7 @@ func fGetIP(source string, network string) net.IP {
 		},
 	},
 	}
-	client.Timeout = *getIPByExternalRequestTimeout
+	client.Timeout = *srvdata.Flags.getIPByExternalRequestTimeout
 
 	req, err := http.NewRequest("GET", "http://"+source+"/ip", nil)
 	if err != nil {
@@ -187,7 +187,7 @@ func getIpByExternalRequest() (res ipSlice) {
 
 func forceReadAllowedIPs() ipSlice {
 	var allowedIPs ipSlice
-	for _, allowed := range strings.Split(*allowIPsString, ",") {
+	for _, allowed := range strings.Split(*srvdata.Flags.allowIPsString, ",") {
 		allowed = strings.TrimSpace(allowed)
 		switch {
 		case allowed == "local":
@@ -210,7 +210,7 @@ func forceReadAllowedIPs() ipSlice {
 
 			var autoAllowedIps ipSlice
 
-			for _, tcpAddr := range bindTo {
+			for _, tcpAddr := range srvdata.bindTo {
 				switch {
 				case tcpAddr.IP.Equal(net.IPv4zero):
 					hasUnspecifiedIpv4 = true
@@ -300,7 +300,7 @@ func forceReadAllowedIPs() ipSlice {
 	copy(allowedIPs, cleanedAllowedIPs)
 	logrus.Info("Detected allowed IPs:", allowedIPs)
 	if needUpdateAllowedIpList {
-		logrus.Infof("Next update allowed ip list: %v (after %v)", time.Now().Add(*allowIPRefreshInterval), *allowIPRefreshInterval)
+		logrus.Infof("Next update allowed ip list: %v (after %v)", time.Now().Add(*srvdata.Flags.allowIPRefreshInterval), *srvdata.Flags.allowIPRefreshInterval)
 	} else {
 		logrus.Info("No need update alowed ip list")
 	}

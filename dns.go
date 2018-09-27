@@ -230,8 +230,8 @@ func getIPsFromDNS(ctx context.Context, domain, dnsServer string, recordType uin
 
 	if deadline, hasDeadline := ctx.Deadline(); hasDeadline {
 		ctxTimeout := time.Until(deadline)
-		if *dnsTimeout < ctxTimeout {
-			ctxTimeout = *dnsTimeout
+		if *srvdata.Flags.dnsTimeout < ctxTimeout {
+			ctxTimeout = *srvdata.Flags.dnsTimeout
 		}
 		dnsClient.DialTimeout = ctxTimeout
 		dnsClient.ReadTimeout = ctxTimeout

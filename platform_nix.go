@@ -33,14 +33,14 @@ func daemonize() bool {
 
 	daemonContext = &daemon.Context{}
 
-	if *runAs != "" {
-		userName := *runAs
+	if *srvdata.Flags.runAs != "" {
+		userName := *srvdata.Flags.runAs
 		user, err := userLookup(userName)
 		if err != nil {
 			logrus.Fatalf("Can't lookup runas user '%v': %v", userName, err)
 		}
 
-		logrus.Infof("Parse runas '%v' as %v:%v", *runAs, user.UserId, user.DefaultGroupId)
+		logrus.Infof("Parse runas '%v' as %v:%v", *srvdata.Flags.runAs, user.UserId, user.DefaultGroupId)
 		daemonContext.Credential = &syscall.Credential{
 			Uid: user.UserId,
 			Gid: user.DefaultGroupId,
@@ -48,13 +48,13 @@ func daemonize() bool {
 		daemonContext.WorkDir = user.HomeDir
 	}
 
-	if *workingDir != "" {
-		daemonContext.WorkDir = *workingDir
+	if *srvdata.Flags.workingDir != "" {
+		daemonContext.WorkDir = *srvdata.Flags.workingDir
 	}
 	logrus.Infof("Daemon working dir: %v", daemonContext.WorkDir)
 
-	if *pidFilePath != "" {
-		pidPath := *pidFilePath
+	if *srvdata.Flags.pidFilePath != "" {
+		pidPath := *srvdata.Flags.pidFilePath
 		if !filepath.IsAbs(pidPath) && daemonContext.WorkDir != "" {
 			pidPath = filepath.Join(daemonContext.WorkDir, pidPath)
 		}
@@ -62,11 +62,11 @@ func daemonize() bool {
 		logrus.Infof("Pidfile: %v", daemonContext.PidFileName)
 	}
 
-	if *stdErrToFile != "" {
-		if filepath.IsAbs(*stdErrToFile) {
-			daemonContext.LogFileName = *stdErrToFile
+	if *srvdata.Flags.stdErrToFile != "" {
+		if filepath.IsAbs(*srvdata.Flags.stdErrToFile) {
+			daemonContext.LogFileName = *srvdata.Flags.stdErrToFile
 		} else {
-			daemonContext.LogFileName = filepath.Join(daemonContext.WorkDir, *stdErrToFile)
+			daemonContext.LogFileName = filepath.Join(daemonContext.WorkDir, *srvdata.Flags.stdErrToFile)
 		}
 
 	}
@@ -79,9 +79,9 @@ func daemonize() bool {
 	if child == nil {
 		logrus.Info("Start as daemon child")
 
-		if *runAs != "" && os.Getuid() == 0 {
+		if *srvdata.Flags.runAs != "" && os.Getuid() == 0 {
 			logrus.Fatal("Start with uid 0 instead runas")
-			logFilePath := *logOutput
+			logFilePath := *srvdata.Flags.logOutput
 			if logFilePath == "" {
 				logFilePath = "FATAL_ERROR.txt"
 			}
